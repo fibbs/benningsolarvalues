@@ -184,6 +184,11 @@ class BenningSolarMetricsWorker:
                 if unit == 'kWh':
                     unit_zabbix = '!kWh'
 
+                if unit == 'h':
+                    unit = 's'
+                    unit_zabbix = 's'
+                    value = value * 3600
+
                 if v[1] == 'SystemState_persistent.Global.LastSystemBackupTimestamp':
                     unit_zabbix = 'unixtime'
 
