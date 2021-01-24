@@ -7,3 +7,6 @@ services:
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
       - ./config:/config:ro
+    build:
+      context: .
+      dockerfile: ./Dockerfile
