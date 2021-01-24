@@ -1,0 +1,12 @@
+version: '3.4'
+
+services:
+  benningsolarvalues:
+    image: benningsolarvalues
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./config:/config:ro
+    build:
+      context: .
+      dockerfile: ./Dockerfile

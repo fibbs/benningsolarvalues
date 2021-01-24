@@ -1,0 +1,9 @@
+---
+repeat: 300
+benning:
+  host: 192.168.1.1
+  username: admin
+  password: password
+mqtt:
+  host: 192.168.1.2
+  topic: BenningSolar/yourhomeplace/metrics

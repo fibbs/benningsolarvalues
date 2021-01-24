@@ -1,0 +1,8 @@
+# To ensure app dependencies are ported from your virtual environment/host machine into your container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
+certifi==2020.12.5
+chardet==4.0.0
+idna==2.10
+paho-mqtt==1.5.1
+PyYAML==5.4.1
+requests==2.25.1
+urllib3==1.26.2
