@@ -9,7 +9,7 @@ __description__ = 'Data collector to fetch data from a "Benning Solar" photovolt
 __author__     = "Christian Anton"
 __copyright__  = "Copyright 2021"
 __license__    = "MIT"
-__version__    = "0.1.0"
+__version__    = "0.2.0"
 __maintainer__ = "Christian Anton"
 __status__     = "Development"
 
@@ -29,6 +29,7 @@ import csv
 # from time import ctime
 import time, traceback
 import requests
+from requests.exceptions import ConnectionError
 import yaml
 import paho.mqtt.client as mqtt
 
@@ -39,7 +40,7 @@ import paho.mqtt.client as mqtt
 
 ###############################################################################
 # configuration
-loglevel = logging.WARNING
+loglevel = logging.INFO
 
 
 ###############################################################################
@@ -121,16 +122,20 @@ class BenningSolarMetricsWorker:
         self.every(config['repeat'], self.do_repeat)
 
     def mqtt_connect(self):
-        def on_connect(client, userdata, flags, rc):
-            logging.info('Connected with result code {}'.format(rc))
-
         def on_publish(client,userdata,result):
             logging.info('data published, result: {}'.format(result))
 
         self.mqtt_client = mqtt.Client()
-        self.mqtt_client.on_connect = on_connect
         self.mqtt_client.on_publish = on_publish
-        self.mqtt_client.connect(config['mqtt']['host'], 1883, 60)
+        try:
+            self.mqtt_client.connect(config['mqtt']['host'], 1883, 60)
+        except Exception as error:
+            logging.error('error occurred connecting to mqtt: {}'.format(error))
+            pass
+            self.mqtt_connected = False
+        else:
+            self.mqtt_connected = True
+
         # self.mqtt_client.loop_start()
 
     def every(self, delay, task):
@@ -149,62 +154,71 @@ class BenningSolarMetricsWorker:
     def do_repeat(self):
         url = 'http://{}/getallentries.cgi?firstOid=10000&lastOid=20000'.format(config['benning']['host'])
         auth = (config['benning']['username'], config['benning']['password'])
-        logging.info('fetch entire values from {}'.format(url))
-        res = requests.get(url, auth=auth)
-        if res.status_code == 200:
-            res.encoding = 'UTF-8'
-            # I have received data in this format
-            # 11305;SystemState.Global.Measurement.ACFrequency;F;50.023193;"AC Netz Frequenz";1.000000;Hz;2;1;2;1;0.000000;0.000000;0;0;0
-            # 11306;SystemState.Global.Measurement.ACFrequencyMin;F;50.019291;"AC Netz Frequenz min";1.000000;Hz;2;1;3;1;0.000000;0.000000;0;0;0
-            # 11307;SystemState.Global.Measurement.ACFrequencyMax;F;50.036274;"AC Netz Frequenz max";1.000000;Hz;2;1;4;1;0.000000;0.000000;0;0;0
-            # ....
-
-            allmetrics = []
-            linecnt = 0
-            for line in res.text.splitlines():
-                linecnt += 1
-                v = line.split(';')
-
-                # handling multipliers and values
-                rawvalue = v[3]
-                multiplier = v[5]
-                if multiplier != '1.000000':
-                    value = float(rawvalue) * float(multiplier)
-                else:
-                    value = float(rawvalue)
-                
-                # handle units containing prefixes
-                unit = v[6]
-                unit_zabbix = unit
-                if unit == 'mA':
-                    value = value * 1000
-                    unit = 'A'
-                    unit_zabbix = 'A'
-
-                if unit == 'kWh':
-                    unit_zabbix = '!kWh'
-
-                if unit == 'h':
-                    unit = 's'
-                    unit_zabbix = 's'
-                    value = value * 3600
-
-                if v[1] == 'SystemState_persistent.Global.LastSystemBackupTimestamp':
-                    unit_zabbix = 'unixtime'
-
-                if v[1] == 'SystemState_persistent.SolarPortal.LastSendProtocolTimestamp':
-                    unit_zabbix = 'unixtime'
-
-                metric = {'id':v[0], 'descriptor':v[1], 'type':v[2], 'value':value, 'description':v[4].strip('"'), 'unit': unit, 'unit_zabbix': unit_zabbix}
-                allmetrics.append(metric)
-
-            logging.info('processed {} values'.format(linecnt))
-
-            # now publish this whole thing as a json structure to MQTT
-            self.mqtt_client.publish(config['mqtt']['topic'], json.dumps(allmetrics))
-            
+        logging.info('fetch all values from {}'.format(url))
+        try:
+            res = requests.get(url, auth=auth)
+        except ConnectionError as error:
+            logging.error('received error during http fetch: {}'.format(error))
+            pass
         else:
-            raise Error('error fetching data: {}'.format(res.text))
+            if res.status_code == 200:
+                res.encoding = 'UTF-8'
+                # I have received data in this format
+                # 11305;SystemState.Global.Measurement.ACFrequency;F;50.023193;"AC Netz Frequenz";1.000000;Hz;2;1;2;1;0.000000;0.000000;0;0;0
+                # 11306;SystemState.Global.Measurement.ACFrequencyMin;F;50.019291;"AC Netz Frequenz min";1.000000;Hz;2;1;3;1;0.000000;0.000000;0;0;0
+                # 11307;SystemState.Global.Measurement.ACFrequencyMax;F;50.036274;"AC Netz Frequenz max";1.000000;Hz;2;1;4;1;0.000000;0.000000;0;0;0
+                # ....
+
+                allmetrics = []
+                linecnt = 0
+                for line in res.text.splitlines():
+                    linecnt += 1
+                    v = line.split(';')
+
+                    # handling multipliers and values
+                    rawvalue = v[3]
+                    multiplier = v[5]
+                    if multiplier != '1.000000':
+                        value = float(rawvalue) * float(multiplier)
+                    else:
+                        value = float(rawvalue)
+                    
+                    # handle units containing prefixes
+                    unit = v[6]
+                    unit_zabbix = unit
+                    if unit == 'mA':
+                        value = value * 1000
+                        unit = 'A'
+                        unit_zabbix = 'A'
+
+                    if unit == 'kWh':
+                        unit_zabbix = '!kWh'
+
+                    if unit == 'h':
+                        unit = 's'
+                        unit_zabbix = 's'
+                        value = value * 3600
+
+                    if v[1] == 'SystemState_persistent.Global.LastSystemBackupTimestamp':
+                        unit_zabbix = 'unixtime'
+
+                    if v[1] == 'SystemState_persistent.SolarPortal.LastSendProtocolTimestamp':
+                        unit_zabbix = 'unixtime'
+
+                    metric = {'id':v[0], 'descriptor':v[1], 'type':v[2], 'value':value, 'description':v[4].strip('"'), 'unit': unit, 'unit_zabbix': unit_zabbix}
+                    allmetrics.append(metric)
+
+                logging.info('processed {} values'.format(linecnt))
+
+                # now publish this whole thing as a json structure to MQTT
+                if self.mqtt_connected:
+                    self.mqtt_client.publish(config['mqtt']['topic'], json.dumps(allmetrics))
+                else:
+                    logging.warning('mqtt is not connected, trying reconnect in order to be able to publish next time')
+                    self.mqtt_connect()
+                
+            else:
+                raise Error('error fetching data: {}'.format(res.text))
 
 def main():
     BenningSolarMetricsWorker()
@@ -217,5 +231,6 @@ if __name__ == '__main__':
        if int(loglevel) >= int(logging.INFO):
             loglevel = logging.INFO
     set_up_logging(loglevel, log_to_foreground)
+    logging.info('starting benningsolarvalues version {}'.format(__version__))
     config = read_config(args.config)
     sys.exit(main())
